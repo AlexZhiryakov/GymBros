@@ -11,13 +11,14 @@ import psycopg2
 from psycopg2 import sql
 from dotenv import load_dotenv
 import os
-import asyncio
+from keep_alive import keep_alive
+
+keep_alive()  # Запускает веб-сервер в фоне
 
 # Загрузка переменных окружения
 load_dotenv()
 
 # Токен бота
-
 TOKEN = os.getenv("TOKEN")
 
 # Данные для подключения к БД

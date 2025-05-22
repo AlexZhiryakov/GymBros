@@ -874,7 +874,7 @@ async def handle_profile_action(update: Update, context: ContextTypes.DEFAULT_TY
     
     print(f"Проверка данных: user_telegram_id={user_id}, target_telegram_id={current_profile['telegram_id']}")
 
-    if action == "❤️ Нравится":
+    if action == "💪":
         # Сохраняем лайк
         print(f"Попытка сохранить действие: user_id={user_id}, target_id={current_profile['id']}, action=1")
         success = await save_user_action(user_id, current_profile['telegram_id'], 1)
@@ -912,7 +912,7 @@ async def handle_profile_action(update: Update, context: ContextTypes.DEFAULT_TY
                     cursor.close()
                     conn.close()
 
-    elif action == "👎 Не нравится":
+    elif action == "👎":
         # Сохраняем дизлайк
         success = await save_user_action(user_id, current_profile['telegram_id'], 0)
         if success != True:

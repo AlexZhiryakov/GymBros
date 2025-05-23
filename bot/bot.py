@@ -297,13 +297,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_data:
         # Если анкета есть, предлагаем выбор
         await update.message.reply_text(
-            "Добро пожаловать в GymBrosBot! У вас уже есть анкета. Что вы хотите сделать?",
+            "Добро пожаловать в GymBros!\n\n" "У вас уже есть анкета. Что вы хотите сделать?",
             reply_markup=get_main_keyboard()
         )
     else:
         # Если анкеты нет, предлагаем только создание
         await update.message.reply_text(
-            "Добро пожаловать в GymBrosBot! Давайте создадим вашу анкету.",
+            "GymBros – бот для поиска напарника для тренировок!\n\n" "🏋️‍♂️🤝 Создавай анкету, ищи GymBro или GymGirl рядом и качайся вместе.\n\n" "Давайте создадим вашу анкету.",
             reply_markup=ReplyKeyboardMarkup([["Создать анкету"]], resize_keyboard=True)
         )
 
@@ -472,7 +472,7 @@ async def get_experience(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.text == "Пропустить":
         context.user_data['experience'] = None
         await update.message.reply_text(
-            "Напишите краткое описание о себе (или нажмите 'Пропустить')",
+            "Напишите краткое описание о себе (или нажмите «Пропустить»)",
             reply_markup=get_skip_or_text_keyboard()
         )
         return DESCRIPTION
@@ -484,7 +484,7 @@ async def get_experience(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['experience'] = experience_category
     
     await update.message.reply_text(
-        "Напишите краткое описание о себе (или нажмите 'Пропустить')",
+        "Напишите краткое описание о себе (или нажмите «Пропустить»)",
         reply_markup=get_skip_or_text_keyboard()
     )
     return DESCRIPTION

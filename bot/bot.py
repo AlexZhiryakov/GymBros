@@ -11,9 +11,6 @@ import psycopg2
 from psycopg2 import sql
 from dotenv import load_dotenv
 import os
-from keep_alive import keep_alive
-
-keep_alive()  # Запускает веб-сервер в фоне
 
 # Загрузка переменных окружения
 load_dotenv()

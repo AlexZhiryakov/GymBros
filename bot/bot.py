@@ -1401,10 +1401,9 @@ async def get_fake_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.text == "Пропустить":
         context.user_data['fake_profile']['photo'] = None
     else:
-        # Получаем самое большое доступное фото
-        photo_file = await update.message.photo[-1].get_file()
-        photo_bytes = await photo_file.download_as_bytearray()
-        context.user_data['fake_profile']['photo'] = photo_bytes
+        # Получаем file_id фотографии вместо самих бинарных данных
+        photo_file_id = update.message.photo[-1].file_id
+        context.user_data['fake_profile']['photo'] = photo_file_id
     
     await update.message.reply_text(
         "Введите название зала:",
@@ -1504,7 +1503,7 @@ async def save_fake_profile_to_db(telegram_id, username, fake_data):
             fake_data.get('description'),
             fake_data['gym_name'],
             fake_data['gym_street'],
-            fake_data.get('photo')
+            fake_data.get('photo')  # Теперь сохраняем file_id вместо бинарных данных
         ))
         
         result = cursor.fetchone()
@@ -1518,7 +1517,6 @@ async def save_fake_profile_to_db(telegram_id, username, fake_data):
     finally:
         if conn:
             conn.close()
-
 
 def main():
     application = Application.builder().token(TOKEN).build()

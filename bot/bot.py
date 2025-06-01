@@ -1258,6 +1258,13 @@ GENERATE_PROFILE, GET_TELEGRAM_ID, GET_USERNAME, GET_NAME, GET_AGE, GET_GENDER, 
 
 async def start_generate_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Начало процесса создания фейковой анкеты"""
+    # Завершаем все текущие диалоги
+    if context.user_data.get('current_profile'):
+        del context.user_data['current_profile']
+    
+    # Очищаем возможные предыдущие данные
+    context.user_data.clear()
+    
     await update.message.reply_text(
         "Введите Telegram ID для фейковой анкеты:",
         reply_markup=ReplyKeyboardRemove()

@@ -1251,6 +1251,235 @@ async def finish_editing(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
+# Создание фейковых анкет
+
+# Новые состояния для генерации анкет
+GENERATE_PROFILE, GET_TELEGRAM_ID, GET_USERNAME, GET_NAME, GET_AGE, GET_GENDER, GET_PREFERRED_GENDER, GET_CITY, GET_EXPERIENCE, GET_DESCRIPTION, GET_GYM_NAME, GET_GYM_STREET = range(12)
+
+async def start_generate_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Начало процесса создания фейковой анкеты"""
+    await update.message.reply_text(
+        "Введите Telegram ID для фейковой анкеты:",
+        reply_markup=ReplyKeyboardRemove()
+    )
+    return GET_TELEGRAM_ID
+
+async def get_telegram_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Получаем Telegram ID"""
+    try:
+        telegram_id = int(update.message.text)
+        context.user_data['fake_profile'] = {'telegram_id': telegram_id}
+        await update.message.reply_text("Введите username (без @):")
+        return GET_USERNAME
+    except ValueError:
+        await update.message.reply_text("Пожалуйста, введите корректный Telegram ID (число):")
+        return GET_TELEGRAM_ID
+
+async def get_username(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Получаем username"""
+    username = update.message.text
+    context.user_data['fake_profile']['username'] = username
+    await update.message.reply_text("Введите имя:")
+    return GET_NAME
+
+async def get_fake_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Получаем имя"""
+    context.user_data['fake_profile']['name'] = update.message.text
+    await update.message.reply_text("Введите возраст:")
+    return GET_AGE
+
+async def get_fake_age(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Получаем возраст"""
+    try:
+        age = int(update.message.text)
+        if age < 10 or age > 100:
+            raise ValueError
+        context.user_data['fake_profile']['age'] = age
+        await update.message.reply_text(
+            "Укажите пол:",
+            reply_markup=ReplyKeyboardMarkup([["Парень", "Девушка"]], resize_keyboard=True)
+        )
+        return GET_GENDER
+    except ValueError:
+        await update.message.reply_text("Пожалуйста, введите корректный возраст (число от 10 до 100)!")
+        return GET_AGE
+
+async def get_fake_gender(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Получаем пол"""
+    gender_text = update.message.text
+    if gender_text == "Парень":
+        context.user_data['fake_profile']['gender'] = 1
+    elif gender_text == "Девушка":
+        context.user_data['fake_profile']['gender'] = 2
+    else:
+        await update.message.reply_text("Пожалуйста, выберите пол из предложенных вариантов")
+        return GET_GENDER
+    
+    await update.message.reply_text(
+        "Кого предпочитаете в качестве напарника?",
+        reply_markup=ReplyKeyboardMarkup([["Gym Bro", "Gym Girl", "Без разницы"]], resize_keyboard=True)
+    )
+    return GET_PREFERRED_GENDER
+
+async def get_fake_preferred_gender(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Получаем предпочтения по полу"""
+    preferred = update.message.text
+    if preferred == "Gym Bro":
+        context.user_data['fake_profile']['preferred_gender'] = 1
+    elif preferred == "Gym Girl":
+        context.user_data['fake_profile']['preferred_gender'] = 2
+    elif preferred == "Без разницы":
+        context.user_data['fake_profile']['preferred_gender'] = 0
+    else:
+        await update.message.reply_text("Пожалуйста, выберите вариант из предложенных")
+        return GET_PREFERRED_GENDER
+    
+    await update.message.reply_text(
+        "Введите город:",
+        reply_markup=ReplyKeyboardRemove()
+    )
+    return GET_CITY
+
+async def get_fake_city(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Получаем город"""
+    city_name = update.message.text
+    city_id = await get_city_id(city_name)
+    
+    if city_id is None:
+        await update.message.reply_text("Город не найден. Пожалуйста, введите корректное название города:")
+        return GET_CITY
+    
+    context.user_data['fake_profile']['city_id'] = city_id
+    context.user_data['fake_profile']['city'] = city_name
+    
+    await update.message.reply_text(
+        "Какой стаж тренировок?",
+        reply_markup=ReplyKeyboardMarkup([
+            ["Новичок", "Продвинутый"],
+            ["Профессионал", "Пропустить"]
+        ], resize_keyboard=True)
+    )
+    return GET_EXPERIENCE
+
+async def get_fake_experience(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Получаем стаж"""
+    if update.message.text == "Пропустить":
+        context.user_data['fake_profile']['experience'] = None
+    else:
+        context.user_data['fake_profile']['experience'] = update.message.text
+    
+    await update.message.reply_text(
+        "Напишите описание о себе:",
+        reply_markup=ReplyKeyboardRemove()
+    )
+    return GET_DESCRIPTION
+
+async def get_fake_description(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Получаем описание"""
+    context.user_data['fake_profile']['description'] = update.message.text
+    await update.message.reply_text("Введите название зала:")
+    return GET_GYM_NAME
+
+async def get_fake_gym_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Получаем название зала"""
+    context.user_data['fake_profile']['gym_name'] = update.message.text
+    await update.message.reply_text("Введите улицу зала:")
+    return GET_GYM_STREET
+
+async def get_fake_gym_street(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Получаем улицу зала и сохраняем анкету"""
+    context.user_data['fake_profile']['gym_street'] = update.message.text
+    
+    # Сохраняем анкету в БД
+    fake_data = context.user_data['fake_profile']
+    profile_id = await save_fake_profile_to_db(
+        fake_data['telegram_id'],
+        fake_data['username'],
+        fake_data
+    )
+    
+    if profile_id:
+        # Формируем текст анкеты
+        profile_text = (
+            f"✅ Фейковая анкета создана (ID: {profile_id}):\n\n"
+            f"Telegram ID: {fake_data['telegram_id']}\n"
+            f"Username: @{fake_data['username']}\n"
+            f"Имя: {fake_data['name']}\n"
+            f"Возраст: {fake_data['age']}\n"
+            f"Пол: {'Парень' if fake_data['gender'] == 1 else 'Девушка'}\n"
+            f"Предпочтения: {get_preferred_gender_text(fake_data['preferred_gender'])}\n"
+            f"Город: {fake_data['city']}\n"
+            f"Зал: {fake_data['gym_name']}, {fake_data['gym_street']}\n"
+            f"Стаж: {fake_data.get('experience', 'Не указан')}\n"
+            f"Описание: {fake_data.get('description', 'Не указано')}"
+        )
+        
+        await update.message.reply_text(profile_text)
+    else:
+        await update.message.reply_text("❌ Не удалось создать фейковую анкету")
+    
+    return ConversationHandler.END
+
+def get_preferred_gender_text(value):
+    """Возвращает текстовое описание предпочтений"""
+    if value == 1:
+        return "Gym Bro"
+    elif value == 2:
+        return "Gym Girl"
+    return "Без разницы"
+
+async def save_fake_profile_to_db(telegram_id, username, fake_data):
+    """Сохраняет фейковую анкету в БД"""
+    conn = None
+    try:
+        conn = psycopg2.connect(**DB_CONFIG)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            INSERT INTO users (
+                telegram_id, username, name, age, gender,
+                preferred_gender, city_id, experience, description,
+                gym_name, gym_street
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (telegram_id) 
+            DO UPDATE SET
+                username = EXCLUDED.username,
+                name = EXCLUDED.name,
+                age = EXCLUDED.age,
+                gender = EXCLUDED.gender,
+                preferred_gender = EXCLUDED.preferred_gender,
+                city_id = EXCLUDED.city_id,
+                experience = EXCLUDED.experience,
+                description = EXCLUDED.description,
+                gym_name = EXCLUDED.gym_name,
+                gym_street = EXCLUDED.gym_street
+            RETURNING id
+        """, (
+            telegram_id,
+            username,
+            fake_data['name'],
+            fake_data['age'],
+            fake_data['gender'],
+            fake_data['preferred_gender'],
+            fake_data['city_id'],
+            fake_data.get('experience'),
+            fake_data.get('description'),
+            fake_data['gym_name'],
+            fake_data['gym_street']
+        ))
+        
+        result = cursor.fetchone()
+        conn.commit()
+        return result[0] if result else None
+    except Exception as e:
+        print(f"Ошибка при сохранении фейковой анкеты: {e}")
+        if conn:
+            conn.rollback()
+        return None
+    finally:
+        if conn:
+            conn.close()
+
 
 def main():
     application = Application.builder().token(TOKEN).build()
@@ -1300,10 +1529,30 @@ def main():
         },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
+
+    # Обработчик генерации фейковых анкет
+    generate_conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("generate_fake", start_generate_profile)],
+        states={
+            GET_TELEGRAM_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_telegram_id)],
+            GET_USERNAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_username)],
+            GET_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_fake_name)],
+            GET_AGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_fake_age)],
+            GET_GENDER: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_fake_gender)],
+            GET_PREFERRED_GENDER: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_fake_preferred_gender)],
+            GET_CITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_fake_city)],
+            GET_EXPERIENCE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_fake_experience)],
+            GET_DESCRIPTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_fake_description)],
+            GET_GYM_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_fake_gym_name)],
+            GET_GYM_STREET: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_fake_gym_street)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
     
     application.add_handler(create_conv_handler)
     application.add_handler(edit_conv_handler)
     application.add_handler(view_profiles_conv)
+    application.add_handler(generate_conv_handler)
     
     # Запуск бота
     application.run_polling()

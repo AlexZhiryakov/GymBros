@@ -1254,7 +1254,7 @@ async def finish_editing(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Создание фейковых анкет
 
 # Новые состояния для генерации анкет
-GENERATE_PROFILE, GET_TELEGRAM_ID, GET_USERNAME, GET_NAME, GET_AGE, GET_GENDER, GET_PREFERRED_GENDER, GET_CITY, GET_EXPERIENCE, GET_DESCRIPTION, GET_GYM_NAME, GET_GYM_STREET = range(12)
+GENERATE_PROFILE, GET_TELEGRAM_ID, GET_USERNAME, GET_NAME, GET_AGE, GET_GENDER, GET_PREFERRED_GENDER, GET_CITY, GET_EXPERIENCE, GET_DESCRIPTION, GET_GYM_NAME, GET_GYM_STREET, GET_PHOTO = range(13)
 
 async def start_generate_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Начало процесса создания фейковой анкеты"""
@@ -1269,17 +1269,26 @@ async def get_telegram_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         telegram_id = int(update.message.text)
         context.user_data['fake_profile'] = {'telegram_id': telegram_id}
-        await update.message.reply_text("Введите username (без @):")
+        await update.message.reply_text(
+            "Введите username (без @) или нажмите 'Пропустить':",
+            reply_markup=ReplyKeyboardMarkup([["Пропустить"]], resize_keyboard=True)
+        )
         return GET_USERNAME
     except ValueError:
         await update.message.reply_text("Пожалуйста, введите корректный Telegram ID (число):")
         return GET_TELEGRAM_ID
 
 async def get_username(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Получаем username"""
-    username = update.message.text
-    context.user_data['fake_profile']['username'] = username
-    await update.message.reply_text("Введите имя:")
+    """Получаем username или пропускаем"""
+    if update.message.text == "Пропустить":
+        context.user_data['fake_profile']['username'] = None
+    else:
+        context.user_data['fake_profile']['username'] = update.message.text
+    
+    await update.message.reply_text(
+        "Введите имя:",
+        reply_markup=ReplyKeyboardRemove()
+    )
     return GET_NAME
 
 async def get_fake_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1369,15 +1378,38 @@ async def get_fake_experience(update: Update, context: ContextTypes.DEFAULT_TYPE
         context.user_data['fake_profile']['experience'] = update.message.text
     
     await update.message.reply_text(
-        "Напишите описание о себе:",
-        reply_markup=ReplyKeyboardRemove()
+        "Напишите описание о себе или нажмите 'Пропустить':",
+        reply_markup=ReplyKeyboardMarkup([["Пропустить"]], resize_keyboard=True)
     )
     return GET_DESCRIPTION
 
 async def get_fake_description(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Получаем описание"""
-    context.user_data['fake_profile']['description'] = update.message.text
-    await update.message.reply_text("Введите название зала:")
+    """Получаем описание или пропускаем"""
+    if update.message.text == "Пропустить":
+        context.user_data['fake_profile']['description'] = None
+    else:
+        context.user_data['fake_profile']['description'] = update.message.text
+    
+    await update.message.reply_text(
+        "Отправьте фото для анкеты (необязательно):",
+        reply_markup=ReplyKeyboardMarkup([["Пропустить"]], resize_keyboard=True)
+    )
+    return GET_PHOTO
+
+async def get_fake_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Получаем фото или пропускаем"""
+    if update.message.text == "Пропустить":
+        context.user_data['fake_profile']['photo'] = None
+    else:
+        # Получаем самое большое доступное фото
+        photo_file = await update.message.photo[-1].get_file()
+        photo_bytes = await photo_file.download_as_bytearray()
+        context.user_data['fake_profile']['photo'] = photo_bytes
+    
+    await update.message.reply_text(
+        "Введите название зала:",
+        reply_markup=ReplyKeyboardRemove()
+    )
     return GET_GYM_NAME
 
 async def get_fake_gym_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1394,7 +1426,7 @@ async def get_fake_gym_street(update: Update, context: ContextTypes.DEFAULT_TYPE
     fake_data = context.user_data['fake_profile']
     profile_id = await save_fake_profile_to_db(
         fake_data['telegram_id'],
-        fake_data['username'],
+        fake_data.get('username'),
         fake_data
     )
     
@@ -1403,7 +1435,7 @@ async def get_fake_gym_street(update: Update, context: ContextTypes.DEFAULT_TYPE
         profile_text = (
             f"✅ Фейковая анкета создана (ID: {profile_id}):\n\n"
             f"Telegram ID: {fake_data['telegram_id']}\n"
-            f"Username: @{fake_data['username']}\n"
+            f"Username: @{fake_data.get('username', 'Не указан')}\n"
             f"Имя: {fake_data['name']}\n"
             f"Возраст: {fake_data['age']}\n"
             f"Пол: {'Парень' if fake_data['gender'] == 1 else 'Девушка'}\n"
@@ -1411,10 +1443,15 @@ async def get_fake_gym_street(update: Update, context: ContextTypes.DEFAULT_TYPE
             f"Город: {fake_data['city']}\n"
             f"Зал: {fake_data['gym_name']}, {fake_data['gym_street']}\n"
             f"Стаж: {fake_data.get('experience', 'Не указан')}\n"
-            f"Описание: {fake_data.get('description', 'Не указано')}"
+            f"Описание: {fake_data.get('description', 'Не указано')}\n"
+            f"Фото: {'Есть' if fake_data.get('photo') else 'Нет'}"
         )
         
         await update.message.reply_text(profile_text)
+        
+        # Если есть фото, отправляем его
+        if fake_data.get('photo'):
+            await update.message.reply_photo(photo=fake_data['photo'])
     else:
         await update.message.reply_text("❌ Не удалось создать фейковую анкету")
     
@@ -1439,8 +1476,8 @@ async def save_fake_profile_to_db(telegram_id, username, fake_data):
             INSERT INTO users (
                 telegram_id, username, name, age, gender,
                 preferred_gender, city_id, experience, description,
-                gym_name, gym_street
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                gym_name, gym_street, photo
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (telegram_id) 
             DO UPDATE SET
                 username = EXCLUDED.username,
@@ -1452,7 +1489,8 @@ async def save_fake_profile_to_db(telegram_id, username, fake_data):
                 experience = EXCLUDED.experience,
                 description = EXCLUDED.description,
                 gym_name = EXCLUDED.gym_name,
-                gym_street = EXCLUDED.gym_street
+                gym_street = EXCLUDED.gym_street,
+                photo = EXCLUDED.photo
             RETURNING id
         """, (
             telegram_id,
@@ -1465,7 +1503,8 @@ async def save_fake_profile_to_db(telegram_id, username, fake_data):
             fake_data.get('experience'),
             fake_data.get('description'),
             fake_data['gym_name'],
-            fake_data['gym_street']
+            fake_data['gym_street'],
+            fake_data.get('photo')
         ))
         
         result = cursor.fetchone()
@@ -1543,6 +1582,10 @@ def main():
             GET_CITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_fake_city)],
             GET_EXPERIENCE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_fake_experience)],
             GET_DESCRIPTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_fake_description)],
+            GET_PHOTO: [
+                MessageHandler(filters.PHOTO, get_fake_photo),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, get_fake_photo)
+            ],
             GET_GYM_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_fake_gym_name)],
             GET_GYM_STREET: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_fake_gym_street)],
         },

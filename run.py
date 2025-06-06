@@ -1,5 +1,5 @@
 from threading import Thread
-from bot import main as run_bot
+from bot.bot import main as run_bot
 from admin import app
 
 def run_admin():

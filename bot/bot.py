@@ -42,8 +42,6 @@ async def get_user_from_db(user_id, context):
         conn = psycopg2.connect(**DB_CONFIG)
         cursor = conn.cursor()
         
-        print(f"Ищем пользователя с telegram_id = {user_id}")
-        print("user_id из context:", context.user_data['user_id'])
         cursor.execute("""
             SELECT u.*, c.name as city_name 
            FROM users u

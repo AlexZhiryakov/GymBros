@@ -11,6 +11,8 @@ import psycopg2
 from psycopg2 import sql
 from dotenv import load_dotenv
 import os
+from admin import app
+
 
 # Загрузка переменных окружения
 load_dotenv()
@@ -614,75 +616,75 @@ async def get_random_ad():
             conn.close()
 
 # Добавляем функцию для обновления статистики просмотров
-# async def update_view_stats(user_id, context):
-#     """Обновляет статистику просмотров и показывает рекламу при необходимости"""
-#     conn = None
-#     try:
-#         conn = psycopg2.connect(**DB_CONFIG)
-#         cursor = conn.cursor()
+async def update_view_stats(user_id, context):
+    """Обновляет статистику просмотров и показывает рекламу при необходимости"""
+    conn = None
+    try:
+        conn = psycopg2.connect(**DB_CONFIG)
+        cursor = conn.cursor()
         
-#         # Получаем ID пользователя из таблицы users
-#         cursor.execute("SELECT id FROM users WHERE telegram_id = %s", (user_id,))
-#         user_db_id = cursor.fetchone()
-#         if not user_db_id:
-#             print(f"Пользователь с telegram_id={user_id} не найден")
-#             return False
+        # Получаем ID пользователя из таблицы users
+        cursor.execute("SELECT id FROM users WHERE telegram_id = %s", (user_id,))
+        user_db_id = cursor.fetchone()
+        if not user_db_id:
+            print(f"Пользователь с telegram_id={user_id} не найден")
+            return False
             
-#         user_db_id = user_db_id[0]
+        user_db_id = user_db_id[0]
         
-#         # Проверяем, есть ли запись в статистике
-#         cursor.execute("""
-#             INSERT INTO user_ad_stats (user_id, profiles_viewed, ads_shown)
-#             VALUES (%s, 1, 0)
-#             ON CONFLICT (user_id) 
-#             DO UPDATE SET 
-#                 profiles_viewed = user_ad_stats.profiles_viewed + 1
-#             RETURNING profiles_viewed
-#         """, (user_db_id,))
+        # Проверяем, есть ли запись в статистике
+        cursor.execute("""
+            INSERT INTO user_ad_stats (user_id, profiles_viewed, ads_shown)
+            VALUES (%s, 1, 0)
+            ON CONFLICT (user_id) 
+            DO UPDATE SET 
+                profiles_viewed = user_ad_stats.profiles_viewed + 1
+            RETURNING profiles_viewed
+        """, (user_db_id,))
         
-#         profiles_viewed = cursor.fetchone()[0]
-#         conn.commit()
+        profiles_viewed = cursor.fetchone()[0]
+        conn.commit()
         
-#         # Проверяем, нужно ли показать рекламу (каждые 30 просмотров)
-#         if profiles_viewed % 30 == 0:
-#             ad = await get_random_ad()
-#             if ad:
-#                 ad_text, ad_image = ad
-#                 try:
-#                     if ad_image:
-#                         await context.bot.send_photo(
-#                             chat_id=user_id,
-#                             photo=ad_image,
-#                             caption=ad_text
-#                         )
-#                     else:
-#                         await context.bot.send_message(
-#                             chat_id=user_id,
-#                             text=ad_text
-#                         )
+        # Проверяем, нужно ли показать рекламу (каждые 30 просмотров)
+        if profiles_viewed % 2 == 0:
+            ad = await get_random_ad()
+            if ad:
+                ad_text, ad_image = ad
+                try:
+                    if ad_image:
+                        await context.bot.send_photo(
+                            chat_id=user_id,
+                            photo=ad_image,
+                            caption=ad_text
+                        )
+                    else:
+                        await context.bot.send_message(
+                            chat_id=user_id,
+                            text=ad_text
+                        )
                     
-#                     # Обновляем счетчик показанных реклам
-#                     cursor.execute("""
-#                         UPDATE user_ad_stats 
-#                         SET ads_shown = ads_shown + 1,
-#                             last_ad_shown_at = CURRENT_TIMESTAMP
-#                         WHERE user_id = %s
-#                     """, (user_db_id,))
-#                     conn.commit()
+                    # Обновляем счетчик показанных реклам
+                    cursor.execute("""
+                        UPDATE user_ad_stats 
+                        SET ads_shown = ads_shown + 1,
+                            last_ad_shown_at = CURRENT_TIMESTAMP
+                        WHERE user_id = %s
+                    """, (user_db_id,))
+                    conn.commit()
                     
-#                 except Exception as e:
-#                     print(f"Ошибка при отправке рекламы: {e}")
+                except Exception as e:
+                    print(f"Ошибка при отправке рекламы: {e}")
         
-#         return True
-#     except Exception as e:
-#         print(f"Ошибка при обновлении статистики просмотров: {e}")
-#         if conn:
-#             conn.rollback()
-#         return False
-#     finally:
-#         if conn:
-#             cursor.close()
-#             conn.close()
+        return True
+    except Exception as e:
+        print(f"Ошибка при обновлении статистики просмотров: {e}")
+        if conn:
+            conn.rollback()
+        return False
+    finally:
+        if conn:
+            cursor.close()
+            conn.close()
 
 # ПРОСМОТР АНКЕТ ################################################################################
 
@@ -1604,6 +1606,3 @@ def main():
     
     # Запуск бота
     application.run_polling()
-
-if __name__ == "__main__":
-    main()

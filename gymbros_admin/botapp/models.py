@@ -5,6 +5,7 @@ class Ad(models.Model):
     image = models.ImageField(upload_to='ads/', blank=True, null=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    telegram_file_id = models.CharField(max_length=255, blank=True, null=True)
 
     def __str__(self):
         return f"Ad {self.id}"

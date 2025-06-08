@@ -619,9 +619,7 @@ async def get_random_ad():
 async def update_view_stats(user_id, context):
     """Обновляет статистику просмотров и показывает рекламу каждые 2 просмотра"""
     try:
-        # Используем транзакцию для атомарности операций
-        with transaction.atomic(using='neon'):  # Если БД называется 'neon'
-            # 1. Получаем или создаем запись статистики для пользователя
+        with transaction.atomic(using='neon'):
             stat, created = UserAdStat.objects.get_or_create(
                 user_id=user_id,
                 defaults={
@@ -632,47 +630,60 @@ async def update_view_stats(user_id, context):
             
             if not created:
                 stat.profiles_viewed += 1
-                stat.save(using='neon')  # Явно указываем БД, если нужно
+                stat.save(using='neon')
             
-            # 2. Проверяем, нужно ли показать рекламу (каждые 2 просмотра)
+            # Показываем рекламу каждые 2 просмотра
             if stat.profiles_viewed % 2 == 0:
-                # Получаем случайную активную рекламу с изображением
                 ad = Ad.objects.filter(
-                    is_active=True,
-                    image__isnull=False
-                ).order_by('?').first()  # `order_by('?')` — аналог `RANDOM()`
+                    is_active=True
+                ).order_by('?').first()
                 
                 if ad:
+                    # Создаем клавиатуру с кнопкой "Пропустить"
+                    skip_keyboard = ReplyKeyboardMarkup([["Пропустить"]], resize_keyboard=True)
+                    
                     try:
-                        # Отправляем рекламу (изображение с подписью)
-                        with open(ad.image.path, 'rb') as photo_file:
+                        # Если есть file_id в базе, используем его
+                        if ad.telegram_file_id:
                             await context.bot.send_photo(
                                 chat_id=user_id,
-                                photo=photo_file,
-                                caption=ad.text
+                                photo=ad.telegram_file_id,
+                                caption=ad.text,
+                                reply_markup=skip_keyboard
                             )
-                        
-                        # Обновляем статистику показов
+                        else:
+                            # Если file_id нет, но есть изображение, загружаем его
+                            if ad.image:
+                                with open(ad.image.path, 'rb') as photo_file:
+                                    message = await context.bot.send_photo(
+                                        chat_id=user_id,
+                                        photo=photo_file,
+                                        caption=ad.text,
+                                        reply_markup=skip_keyboard
+                                    )
+                                    # Сохраняем file_id для будущего использования
+                                    if message.photo:
+                                        ad.telegram_file_id = message.photo[-1].file_id
+                                        ad.save()
                         stat.ads_shown += 1
                         stat.save(using='neon')
-                        
-                        print(f"Реклама успешно показана пользователю {user_id}")
-                        
+                        return True  # Реклама была показана
                     except Exception as e:
-                        print(f"Ошибка при отправке рекламы: {e}")
-                        # Пробуем отправить хотя бы текст
-                        try:
-                            await context.bot.send_message(
-                                chat_id=user_id,
-                                text=ad.text
-                            )
-                        except Exception as fallback_error:
-                            print(f"Не удалось отправить даже текстовую рекламу: {fallback_error}")
-        
-        return True
+                        print(f"Ошибка при отправке рекламы с фото: {e}")
+                        # Если не удалось отправить с фото, отправляем текстовое сообщение
+                        await context.bot.send_message(
+                            chat_id=user_id,
+                            text=ad.text,
+                            reply_markup=skip_keyboard
+                        )
+                        stat.ads_shown += 1
+                        stat.save(using='neon')
+                        return True  # Реклама была показана
+    
+        return False  # Реклама не была показана
         
     except Exception as e:
-        print(f"Ошибка при обновлении статистики просмотров: {e}")
+        print(f"Ошибка при обновлении статистики: {e}")
         return False
     
 
@@ -815,7 +826,7 @@ async def save_user_action(user_telegram_id, target_user_telegram_id, action):
 def get_profile_action_keyboard():
     return ReplyKeyboardMarkup([
         ["💪", "👎"],
-        ["⏹️ Закончить просмотр"]
+        ["⏹️ Закончить просмот"]
     ], resize_keyboard=True)
 
 async def view_profiles(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -842,7 +853,7 @@ async def view_profiles(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['current_profile'] = profile
     print("Текущий профиль сохранён:", profile)
     
-    # Формируем и показываем анкету
+    # Показываем анкету
     await show_profile(update, profile)
     
     return PROFILE_ACTION
@@ -854,6 +865,14 @@ async def handle_profile_action(update: Update, context: ContextTypes.DEFAULT_TY
     current_profile = context.user_data.get('current_profile')
     user_id = context.user_data['user_id']  # telegram_id текущего пользователя
 
+    # Если пользователь нажал "Пропустить" на рекламе, продолжаем показ анкет
+    if action == "Пропустить":
+        # Удаляем клавиатуру "Пропустить"
+        await update.message.reply_text("Реклама пропущена. Продолжаем показ анкет...", 
+                                     reply_markup=ReplyKeyboardRemove())
+        # Продолжаем обычный процесс показа анкет
+        return await continue_showing_profiles(update, context)
+    
     if not current_profile:
         await update.message.reply_text(
             "Ошибка: анкета не найдена.",
@@ -861,36 +880,29 @@ async def handle_profile_action(update: Update, context: ContextTypes.DEFAULT_TY
         )
         return ConversationHandler.END
     
-    print(f"Проверка данных: user_telegram_id={user_id}, target_telegram_id={current_profile['telegram_id']}")
-
     if action == "💪":
         # Сохраняем лайк
-        print(f"Попытка сохранить действие: user_id={user_id}, target_id={current_profile['id']}, action=1")
         success = await save_user_action(user_id, current_profile['telegram_id'], 1)
         
-        # Добавляем сообщение о сохранении лайка
         if success != True:
             await update.message.reply_text("Не удалось сохранить ваш лайк. Попробуйте позже.")
         
         if success:
-            # Проверяем взаимный лайк (используем id из базы, а не telegram_id)
+            # Проверяем взаимный лайк
             conn = None
             try:
                 conn = psycopg2.connect(**DB_CONFIG)
                 cursor = conn.cursor()
                 
-                # Получаем id текущего пользователя
                 cursor.execute("SELECT id FROM users WHERE telegram_id = %s", (user_id,))
                 current_user_id = cursor.fetchone()[0]
 
-                # Проверяем, есть ли лайк от target_user к current_user
                 cursor.execute("""
                     SELECT 1 FROM user_actions
                     WHERE user_id = %s AND target_user_id = %s AND action = 1
-                """, (current_profile['id'], current_user_id))  # Используем id, а не telegram_id
+                """, (current_profile['id'], current_user_id))
                 
                 if cursor.fetchone():
-                    # Есть взаимный лайк - отправляем уведомления
                     await send_match_notification(context.bot, user_id, current_profile['telegram_id'])
                     await send_match_notification(context.bot, current_profile['telegram_id'], user_id)
 
@@ -907,7 +919,7 @@ async def handle_profile_action(update: Update, context: ContextTypes.DEFAULT_TY
         if success != True:
             await update.message.reply_text("Не удалось сохранить ваш дизлайк. Попробуйте позже.")
     
-    elif action == "⏹️ Закончить просмотр":
+    elif action == "⏹️ Закончить просмот":
         await update.message.reply_text(
             "Просмотр анкет завершен.",
             reply_markup=get_edit_keyboard()
@@ -915,10 +927,19 @@ async def handle_profile_action(update: Update, context: ContextTypes.DEFAULT_TY
         return ConversationHandler.END
     
     # Обновляем статистику просмотров и проверяем рекламу
-    await update_view_stats(user_id, context)
+    ad_shown = await update_view_stats(user_id, context)
     
+    # Если была показана реклама, ждем нажатия кнопки "Пропустить"
+    if ad_shown:
+        return PROFILE_ACTION  # Остаемся в том же состоянии
+    
+    # Если реклама не была показана, продолжаем показ анкет
+    return await continue_showing_profiles(update, context)
+
+async def continue_showing_profiles(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Продолжает показ анкет после рекламы или если реклама не была показана"""
     # Получаем следующую анкету
-    profile = await get_potential_matches(user_id, context)
+    profile = await get_potential_matches(context.user_data['user_id'], context)
     
     if not profile:
         await update.message.reply_text(

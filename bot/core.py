@@ -11,6 +11,9 @@ import psycopg2
 from psycopg2 import sql
 from dotenv import load_dotenv
 import os
+from django.db import transaction
+import os
+from gymbros_admin.botapp.models import UserAdStat, Ad
 
 
 # Загрузка переменных окружения
@@ -615,87 +618,63 @@ async def get_random_ad():
 # Добавляем функцию для обновления статистики просмотров
 async def update_view_stats(user_id, context):
     """Обновляет статистику просмотров и показывает рекламу каждые 2 просмотра"""
-    conn = None
     try:
-        conn = psycopg2.connect(**DB_CONFIG)
-        cursor = conn.cursor()
-        
-        # 1. Получаем или создаем запись статистики для пользователя
-        cursor.execute("""
-            INSERT INTO botapp_useradstat (user_id, profiles_viewed, ads_shown)
-            VALUES (%s, 1, 0)
-            ON CONFLICT (user_id) 
-            DO UPDATE SET 
-                profiles_viewed = botapp_useradstat.profiles_viewed + 1
-            RETURNING profiles_viewed
-        """, (user_id,))
-        
-        profiles_viewed = cursor.fetchone()[0]
-        conn.commit()
-        
-        # 2. Проверяем, нужно ли показать рекламу (каждые 2 просмотра)
-        if profiles_viewed % 2 == 0:
-            # Получаем случайную активную рекламу с изображением
-            cursor.execute("""
-                SELECT text, image 
-                FROM botapp_ad 
-                WHERE is_active = TRUE AND image IS NOT NULL
-                ORDER BY RANDOM()
-                LIMIT 1
-            """)
+        # Используем транзакцию для атомарности операций
+        with transaction.atomic(using='neon'):  # Если БД называется 'neon'
+            # 1. Получаем или создаем запись статистики для пользователя
+            stat, created = UserAdStat.objects.get_or_create(
+                user_id=user_id,
+                defaults={
+                    'profiles_viewed': 1,
+                    'ads_shown': 0
+                }
+            )
             
-            ad = cursor.fetchone()
+            if not created:
+                stat.profiles_viewed += 1
+                stat.save(using='neon')  # Явно указываем БД, если нужно
             
-            if ad:
-                ad_text, ad_image_path = ad
+            # 2. Проверяем, нужно ли показать рекламу (каждые 2 просмотра)
+            if stat.profiles_viewed % 2 == 0:
+                # Получаем случайную активную рекламу с изображением
+                ad = Ad.objects.filter(
+                    is_active=True,
+                    image__isnull=False
+                ).order_by('?').first()  # `order_by('?')` — аналог `RANDOM()`
                 
-                try:
-                    # Отправляем рекламу (изображение с подписью)
-                    with open(ad_image_path, 'rb') as photo_file:
-                        await context.bot.send_photo(
-                            chat_id=user_id,
-                            photo=photo_file,
-                            caption=ad_text
-                        )
-                    
-                    # Обновляем статистику показов
-                    cursor.execute("""
-                        UPDATE botapp_useradstat 
-                        SET ads_shown = ads_shown + 1,
-                            last_ad_shown_at = CURRENT_TIMESTAMP
-                        WHERE user_id = %s
-                    """, (user_id,))
-                    
-                    conn.commit()
-                    
-                    print(f"Реклама успешно показана пользователю {user_id}")
-                    
-                except Exception as e:
-                    print(f"Ошибка при отправке рекламы: {e}")
-                    # Откатываем транзакцию в случае ошибки
-                    conn.rollback()
-                    
-                    # Пробуем отправить хотя бы текст, если изображение не загрузилось
+                if ad:
                     try:
-                        await context.bot.send_message(
-                            chat_id=user_id,
-                            text=ad_text
-                        )
-                    except Exception as fallback_error:
-                        print(f"Не удалось отправить даже текстовую рекламу: {fallback_error}")
+                        # Отправляем рекламу (изображение с подписью)
+                        with open(ad.image.path, 'rb') as photo_file:
+                            await context.bot.send_photo(
+                                chat_id=user_id,
+                                photo=photo_file,
+                                caption=ad.text
+                            )
+                        
+                        # Обновляем статистику показов
+                        stat.ads_shown += 1
+                        stat.save(using='neon')
+                        
+                        print(f"Реклама успешно показана пользователю {user_id}")
+                        
+                    except Exception as e:
+                        print(f"Ошибка при отправке рекламы: {e}")
+                        # Пробуем отправить хотя бы текст
+                        try:
+                            await context.bot.send_message(
+                                chat_id=user_id,
+                                text=ad.text
+                            )
+                        except Exception as fallback_error:
+                            print(f"Не удалось отправить даже текстовую рекламу: {fallback_error}")
         
         return True
         
     except Exception as e:
         print(f"Ошибка при обновлении статистики просмотров: {e}")
-        if conn:
-            conn.rollback()
         return False
-        
-    finally:
-        if conn:
-            cursor.close()
-            conn.close()
+    
 
 # ПРОСМОТР АНКЕТ ################################################################################
 
@@ -936,7 +915,7 @@ async def handle_profile_action(update: Update, context: ContextTypes.DEFAULT_TY
         return ConversationHandler.END
     
     # Обновляем статистику просмотров и проверяем рекламу
-    # await update_view_stats(user_id, context)
+    await update_view_stats(user_id, context)
     
     # Получаем следующую анкету
     profile = await get_potential_matches(user_id, context)

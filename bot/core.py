@@ -10,10 +10,19 @@ from telegram.ext import (
 import psycopg2
 from psycopg2 import sql
 from dotenv import load_dotenv
-import os
 from django.db import transaction
+import django
 import os
-from gymbros_admin.botapp.models import UserAdStat, Ad
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # /root/
+sys.path.insert(0, "/root/gymbros_admin")  # Путь к Django-проекту
+
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "gymbros_admin.settings")
+django.setup()  # Инициализация Django
+
+# Теперь можно импортировать модели
+from botapp.models import UserAdStat, Ad
 
 
 # Загрузка переменных окружения
@@ -826,7 +835,7 @@ async def save_user_action(user_telegram_id, target_user_telegram_id, action):
 def get_profile_action_keyboard():
     return ReplyKeyboardMarkup([
         ["💪", "👎"],
-        ["⏹️ Закончить просмот"]
+        ["⏹️ Закончить просмотр"]
     ], resize_keyboard=True)
 
 async def view_profiles(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -837,11 +846,11 @@ async def view_profiles(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=get_main_keyboard()
         )
         return ConversationHandler.END
-    
+
     print("Ищем анкеты для user_id:", context.user_data['user_id'])
     profile = await get_potential_matches(context.user_data['user_id'], context)
     print("Результат поиска анкет:", profile)
-    
+
     if not profile:
         await update.message.reply_text(
             "Нет подходящих анкет для просмотра.",
@@ -919,7 +928,7 @@ async def handle_profile_action(update: Update, context: ContextTypes.DEFAULT_TY
         if success != True:
             await update.message.reply_text("Не удалось сохранить ваш дизлайк. Попробуйте позже.")
     
-    elif action == "⏹️ Закончить просмот":
+    elif action == "⏹️ Закончить просмотр":
         await update.message.reply_text(
             "Просмотр анкет завершен.",
             reply_markup=get_edit_keyboard()

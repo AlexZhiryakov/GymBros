@@ -14,6 +14,8 @@ from django.db import transaction
 import django
 import os
 import sys
+from asgiref.sync import sync_to_async
+from telegram.ext import PicklePersistence
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # /root/
 sys.path.insert(0, "/root/gymbros_admin")  # Путь к Django-проекту
@@ -253,7 +255,6 @@ async def save_user_to_db(user_data, context, update: Update = None):
     finally:
         if conn:
             conn.close()
-
 
 def get_main_keyboard():
     return ReplyKeyboardMarkup(
@@ -624,73 +625,78 @@ async def get_random_ad():
             cursor.close()
             conn.close()
 
-# Добавляем функцию для обновления статистики просмотров
+# HTML-код рекламы
 async def update_view_stats(user_id, context):
     """Обновляет статистику просмотров и показывает рекламу каждые 2 просмотра"""
     try:
-        with transaction.atomic(using='neon'):
-            stat, created = UserAdStat.objects.get_or_create(
-                user_id=user_id,
-                defaults={
-                    'profiles_viewed': 1,
-                    'ads_shown': 0
-                }
-            )
-            
-            if not created:
-                stat.profiles_viewed += 1
-                stat.save(using='neon')
-            
-            # Показываем рекламу каждые 2 просмотра
-            if stat.profiles_viewed % 2 == 0:
-                ad = Ad.objects.filter(
-                    is_active=True
-                ).order_by('?').first()
-                
-                if ad:
-                    # Создаем клавиатуру с кнопкой "Пропустить"
-                    skip_keyboard = ReplyKeyboardMarkup([["Пропустить"]], resize_keyboard=True)
-                    
-                    try:
-                        # Если есть file_id в базе, используем его
-                        if ad.telegram_file_id:
-                            await context.bot.send_photo(
+        # Оборачиваем синхронный блок транзакции
+        @sync_to_async
+        def update_stats():
+            from django.db import transaction
+
+            with transaction.atomic():
+                stat, created = UserAdStat.objects.get_or_create(
+                    user_id=user_id,
+                    defaults={
+                        'profiles_viewed': 1,
+                        'ads_shown': 0
+                    }
+                )
+
+                if not created:
+                    stat.profiles_viewed += 1
+                    stat.save()
+
+                return stat
+
+        stat = await update_stats()
+
+        # Показываем рекламу каждые 2 просмотра
+        if stat.profiles_viewed % 100000 == 0:
+
+            ad = await sync_to_async(
+                lambda: Ad.objects.filter(is_active=True).order_by('?').first()
+            )()
+
+            if ad:
+                skip_keyboard = ReplyKeyboardMarkup([["Пропустить"]], resize_keyboard=True)
+
+                try:
+                    if ad.telegram_file_id:
+                        await context.bot.send_photo(
+                            chat_id=user_id,
+                            photo=ad.telegram_file_id,
+                            caption=ad.text,
+                            reply_markup=skip_keyboard
+                        )
+                    elif ad.image:
+                        with open(ad.image.path, 'rb') as photo_file:
+                            message = await context.bot.send_photo(
                                 chat_id=user_id,
-                                photo=ad.telegram_file_id,
+                                photo=photo_file,
                                 caption=ad.text,
                                 reply_markup=skip_keyboard
                             )
-                        else:
-                            # Если file_id нет, но есть изображение, загружаем его
-                            if ad.image:
-                                with open(ad.image.path, 'rb') as photo_file:
-                                    message = await context.bot.send_photo(
-                                        chat_id=user_id,
-                                        photo=photo_file,
-                                        caption=ad.text,
-                                        reply_markup=skip_keyboard
-                                    )
-                                    # Сохраняем file_id для будущего использования
-                                    if message.photo:
-                                        ad.telegram_file_id = message.photo[-1].file_id
-                                        ad.save()
-                        stat.ads_shown += 1
-                        stat.save(using='neon')
-                        return True  # Реклама была показана
-                    except Exception as e:
-                        print(f"Ошибка при отправке рекламы с фото: {e}")
-                        # Если не удалось отправить с фото, отправляем текстовое сообщение
-                        await context.bot.send_message(
-                            chat_id=user_id,
-                            text=ad.text,
-                            reply_markup=skip_keyboard
-                        )
-                        stat.ads_shown += 1
-                        stat.save(using='neon')
-                        return True  # Реклама была показана
-    
-        return False  # Реклама не была показана
-        
+                            if message.photo:
+                                ad.telegram_file_id = message.photo[-1].file_id
+                                await sync_to_async(ad.save)()
+                    stat.ads_shown += 1
+                    await sync_to_async(stat.save)()
+                    return True
+                except Exception as e:
+                    print(f"Ошибка при отправке рекламы с фото: {e}")
+                    await context.bot.send_message(
+                        chat_id=user_id,
+                        text=ad.text,
+                        reply_markup=skip_keyboard,
+                        parse_mode='HTML',
+                    )
+                    stat.ads_shown += 1
+                    await sync_to_async(stat.save)()
+                    return True
+
+        return False
+
     except Exception as e:
         print(f"Ошибка при обновлении статистики: {e}")
         return False

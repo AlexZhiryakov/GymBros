@@ -22,6 +22,14 @@ from telegram import InputMediaPhoto, InputMediaVideo
 from botapp.models import UserAdStat, UserAdView, Ad
 from datetime import datetime
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from bot.legal import (
+    consent_message,
+    privacy_command_message,
+    ensure_consents_table,
+    has_valid_consent,
+    record_consent,
+    operator_contact,
+)
 
 # Добавляем путь к корню проекта (/root)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -58,6 +66,37 @@ DB_CONFIG = {
     NAME, PHOTO, AGE, GENDER, PREFERRED_GENDER, CITY, EXPERIENCE, 
     DESCRIPTION, GYM_NAME, GYM_STREET, TOGGLE_BADGE
 ) = range(11)
+
+# Отдельное состояние согласия на обработку ПДн (не пересекается с REFERRAL_INPUT=101)
+CONSENT = 100
+
+
+def get_consent_keyboard():
+    return ReplyKeyboardMarkup(
+        [["✅ Согласен", "❌ Не согласен"]],
+        resize_keyboard=True,
+    )
+
+
+async def prompt_consent(update: Update, context: ContextTypes.DEFAULT_TYPE, pending_action: str):
+    """Показать отдельный экран согласия (152-ФЗ) до сбора анкеты."""
+    context.user_data["pending_after_consent"] = pending_action
+    await update.message.reply_text(
+        consent_message(),
+        parse_mode="HTML",
+        reply_markup=get_consent_keyboard(),
+        disable_web_page_preview=True,
+    )
+    return CONSENT
+
+
+async def ensure_user_consent(update: Update, context: ContextTypes.DEFAULT_TYPE, pending_action: str) -> bool:
+    """True, если согласие уже есть; иначе показывает prompt и возвращает False."""
+    user_id = update.effective_user.id
+    if has_valid_consent(DB_CONFIG, user_id):
+        return True
+    await prompt_consent(update, context, pending_action)
+    return False
 
 async def get_user_from_db(user_id, context):
     """Получаем данные пользователя из таблицы users"""
@@ -373,13 +412,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "Вы уже начали создание анкеты. Пожалуйста, завершите его, прежде чем снова использовать /start."
         )
-        return
+        return ConversationHandler.END
     
     if context.user_data.get('is_editing_profile'):
         await update.message.reply_text(
             "Вы редактируете анкету. Завершите редактирование, прежде чем использовать /start."
         )
-        return
+        return ConversationHandler.END
     
     # Сохраняем telegram_id пользователя
     context.user_data['user_id'] = update.effective_user.id
@@ -387,6 +426,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Если есть реферальный код, сохраняем его в контексте
     if referrer_id:
         context.user_data['referrer_id'] = referrer_id
+
+    # 152-ФЗ: без действующего согласия не пускаем в анкетный функционал
+    if not has_valid_consent(DB_CONFIG, context.user_data['user_id']):
+        return await prompt_consent(update, context, "start_menu")
     
     # Проверяем, есть ли у пользователя анкета
     user_data = await get_user_from_db(context.user_data['user_id'], context)
@@ -405,11 +448,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Давайте создадим вашу анкету.",
             reply_markup=ReplyKeyboardMarkup([["Создать анкету"]], resize_keyboard=True)
         )
+    return ConversationHandler.END
 
 # Добавляем обработчик для кнопки "Использовать существующую"
 async def use_existing_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     current_username = update.effective_user.username  # Получаем текущий username
+
+    if not await ensure_user_consent(update, context, "use_existing"):
+        return
     
     # Получаем данные пользователя из базы
     user_data = await get_user_from_db(user_id, context)
@@ -460,9 +507,15 @@ async def use_existing_profile(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def begin_questionnaire(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Начинаем создание анкеты"""
+    """Начинаем создание анкеты (только после согласия на обработку ПДн)."""
     context.user_data['user_id'] = update.effective_user.id
     print('вызов begin_questionnaire')
+
+    if not has_valid_consent(DB_CONFIG, context.user_data['user_id']):
+        return await prompt_consent(update, context, "create_profile")
+
+    # Сохраняем реферера до очистки контекста
+    referrer_id = context.user_data.get('referrer_id')
 
     # Получаем текущее значение show_badge перед очисткой
     current_user_data = await get_user_from_db(context.user_data['user_id'], context)
@@ -471,6 +524,8 @@ async def begin_questionnaire(update: Update, context: ContextTypes.DEFAULT_TYPE
     # Очищаем ВСЕ данные из предыдущей анкеты, кроме медиафайлов
     context.user_data.clear()
     context.user_data['user_id'] = update.effective_user.id  # Восстанавливаем user_id
+    if referrer_id:
+        context.user_data['referrer_id'] = referrer_id
 
     context.user_data['is_creating_profile'] = True
 
@@ -494,6 +549,93 @@ async def begin_questionnaire(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     await update.message.reply_text("Как вас зовут?", reply_markup=ReplyKeyboardRemove())
     return NAME
+
+
+async def handle_consent_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка кнопок согласия / отказа (отдельный документ от оферты подписки)."""
+    text = (update.message.text or "").strip()
+    user_id = update.effective_user.id
+    pending = context.user_data.get("pending_after_consent", "start_menu")
+
+    if text == "✅ Согласен":
+        ok = record_consent(DB_CONFIG, user_id, True)
+        if not ok:
+            await update.message.reply_text(
+                "Не удалось сохранить согласие. Попробуйте /start позже или напишите оператору "
+                f"({operator_contact()})."
+            )
+            return CONSENT
+        context.user_data.pop("pending_after_consent", None)
+        await update.message.reply_text(
+            "Спасибо! Согласие зафиксировано. Политика: /privacy",
+        )
+        if pending == "create_profile":
+            # Продолжение в ConversationHandler создания анкеты
+            return await begin_questionnaire(update, context)
+
+        user_data = await get_user_from_db(user_id, context)
+        if user_data:
+            await update.message.reply_text(
+                "Добро пожаловать в GymBros!\n\nУ вас уже есть анкета. Что вы хотите сделать?",
+                reply_markup=get_main_keyboard(),
+            )
+        else:
+            await update.message.reply_text(
+                "🏋️‍♂️ GymBros – бот для поиска напарника для тренировок!\n\n"
+                "Нажмите «Создать анкету», чтобы продолжить.",
+                reply_markup=ReplyKeyboardMarkup([["Создать анкету"]], resize_keyboard=True),
+            )
+        if pending in ("use_existing", "view_profiles"):
+            await update.message.reply_text(
+                "Согласие принято. Нажмите нужную кнопку меню ещё раз.",
+                reply_markup=get_edit_keyboard() if user_data else get_main_keyboard(),
+            )
+        return ConversationHandler.END
+
+    if text == "❌ Не согласен":
+        record_consent(DB_CONFIG, user_id, False)
+        context.user_data.pop("pending_after_consent", None)
+        await update.message.reply_text(
+            "Без согласия на обработку персональных данных пользоваться анкетой нельзя.\n"
+            "Вы можете позже нажать /start и принять согласие.\n"
+            "Подробнее: /privacy",
+            reply_markup=ReplyKeyboardRemove(),
+        )
+        return ConversationHandler.END
+
+    await update.message.reply_text(
+        "Пожалуйста, выберите «✅ Согласен» или «❌ Не согласен».",
+        reply_markup=get_consent_keyboard(),
+    )
+    return CONSENT
+
+
+async def privacy_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        privacy_command_message(),
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+    )
+
+
+async def delete_my_data_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Отзыв согласия + удаление анкеты и связанных данных."""
+    user_id = update.effective_user.id
+    deleted = await delete_user_profile(user_id)
+    record_consent(DB_CONFIG, user_id, False)
+    context.user_data.clear()
+    if deleted:
+        await update.message.reply_text(
+            "✅ Анкета и связанные данные удалены, согласие отозвано.\n"
+            "Чтобы пользоваться ботом снова, отправьте /start и дайте новое согласие.",
+            reply_markup=ReplyKeyboardRemove(),
+        )
+    else:
+        await update.message.reply_text(
+            "Анкета не найдена (или уже удалена). Согласие отозвано.\n"
+            "Повторный старт: /start",
+            reply_markup=ReplyKeyboardRemove(),
+        )
 
 async def get_city_canonical_name(city_id):
     """Получаем основное название города по ID"""
@@ -1359,12 +1501,11 @@ def get_profile_action_keyboard(user_id=None, is_super_like_possible=False):
 
 async def view_profiles(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Начало просмотра анкет"""
-    if 'user_id' not in context.user_data:
-        await update.message.reply_text(
-            "У вас нет анкеты. Сначала создайте её.",
-            reply_markup=get_main_keyboard()
-        )
+    if not await ensure_user_consent(update, context, "view_profiles"):
         return ConversationHandler.END
+
+    if 'user_id' not in context.user_data:
+        context.user_data['user_id'] = update.effective_user.id
 
     user_id = context.user_data['user_id']
     subscription_type = await get_user_subscription(user_id)
@@ -2811,7 +2952,7 @@ async def delete_user_profile(user_id):
         cursor.execute("DELETE FROM user_photos WHERE user_id = %s", (user_db_id,))
         cursor.execute("DELETE FROM user_actions WHERE user_id = %s OR target_user_id = %s", (user_db_id, user_db_id))
         cursor.execute("DELETE FROM users WHERE id = %s", (user_db_id,))
-        
+
         conn.commit()
         return True
     except Exception as e:
@@ -4505,15 +4646,31 @@ async def show_leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def main():
+    if not TOKEN:
+        raise RuntimeError("TOKEN is not set. Copy .env.example to .env or set hosting secrets.")
+
+    ensure_consents_table(DB_CONFIG)
+
     application = Application.builder().token(TOKEN).build()
-    
-    # Обработчик команды /start
-    application.add_handler(CommandHandler("start", start))
+
+    consent_button_filter = filters.Regex("^(✅ Согласен|❌ Не согласен)$")
+
+    # /start + экран согласия (152-ФЗ)
+    start_conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("start", start)],
+        states={
+            CONSENT: [MessageHandler(consent_button_filter, handle_consent_response)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel), CommandHandler("start", start)],
+        allow_reentry=True,
+    )
+    application.add_handler(start_conv_handler)
 
     # Обработчик создания анкеты
     create_conv_handler = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex("^Создать анкету$"), begin_questionnaire)],
         states={
+            CONSENT: [MessageHandler(consent_button_filter, handle_consent_response)],
             NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_name)],
             PHOTO: [
                 MessageHandler(filters.PHOTO | filters.VIDEO | filters.TEXT, get_media)
@@ -4529,10 +4686,17 @@ def main():
             REFERRAL_INPUT: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_referral_input)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
+        allow_reentry=True,
     )
+
+    # Fallback согласия (если экран показали вне start/create conversation)
+    application.add_handler(MessageHandler(consent_button_filter, handle_consent_response))
 
     # Обработчик использования существующей анкеты
     application.add_handler(MessageHandler(filters.Regex("^Использовать существующую$"), use_existing_profile))
+
+    application.add_handler(CommandHandler("privacy", privacy_command))
+    application.add_handler(CommandHandler("delete_my_data", delete_my_data_command))
 
     # Обновим ConversationHandler для редактирования
     edit_conv_handler = ConversationHandler(

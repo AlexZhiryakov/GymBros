@@ -1,3 +1,9 @@
 __pycache__/
 venv/
+.venv/
 *.pyc
+.env
+.env.local
+*.log
+.DS_Store
+gymbros_admin/media/ads/

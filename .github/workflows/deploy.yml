@@ -1,28 +1,32 @@
+# Legacy VPS deploy (rsync + systemctl gymbot). The old server is gone.
+# Kept disabled so pushes to main do not fail on missing SSH secrets.
+# Prefer Railway / Render worker / Oracle Free VM — see README.md.
+
 name: Deploy to Server
 
 on:
-  push:
-    branches: [ main ]
+  workflow_dispatch:  # manual only
 
 jobs:
   deploy:
+    if: false  # re-enable only after new VPS + secrets SSH_PRIVATE_KEY, SERVER_IP, PROJECT_PATH
     runs-on: ubuntu-latest
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-      
+
     - name: Install SSH key
       uses: shimataro/ssh-key-action@v2
       with:
         key: ${{ secrets.SSH_PRIVATE_KEY }}
         known_hosts: ${{ secrets.KNOWN_HOSTS || 'just-a-placeholder-so-we-dont-get-errors' }}
-        
+
     - name: Deploy via Rsync
       run: |
         rsync -avz --delete -e "ssh -o StrictHostKeyChecking=no" \
           ./ root@${{ secrets.SERVER_IP }}:${{ secrets.PROJECT_PATH }}/
-        
+
     - name: Restart Service
       run: |
         ssh -o StrictHostKeyChecking=no root@${{ secrets.SERVER_IP }} \

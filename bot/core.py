@@ -1,3 +1,24 @@
+import os
+import sys
+import asyncio
+from datetime import datetime
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ADMIN_DIR = os.path.join(ROOT_DIR, "gymbros_admin")
+sys.path.insert(0, ROOT_DIR)
+sys.path.insert(0, ADMIN_DIR)
+
+import django
+
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "gymbros_admin.settings")
+if not os.environ.get("DJANGO_SETUP_DONE"):
+    django.setup()
+    os.environ["DJANGO_SETUP_DONE"] = "1"
+
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import (
     Application,
@@ -9,34 +30,14 @@ from telegram.ext import (
 )
 import psycopg2
 from psycopg2 import sql
-from dotenv import load_dotenv
 from django.db import transaction
-import django
-import os
-import sys
 from asgiref.sync import sync_to_async
-import asyncio
 from telegram.error import Forbidden, BadRequest, TimedOut
 from telegram import Bot
 from telegram import InputMediaPhoto, InputMediaVideo
 from botapp.models import UserAdStat, UserAdView, Ad
-from datetime import datetime
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from bot import legal as legal_texts
-
-# Добавляем путь к корню проекта (/root)
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-# Добавляем путь к папке Django-проекта (/root/gymbros_admin)
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "gymbros_admin"))
-
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "gymbros_admin.gymbros_admin.settings")
-django.setup()  # Инициализация Django
-
-
-
-# Загрузка переменных окружения
-load_dotenv()
 
 # Токен бота
 TOKEN = os.getenv("TOKEN")

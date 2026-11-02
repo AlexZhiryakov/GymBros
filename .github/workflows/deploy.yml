@@ -1,28 +1,29 @@
 name: Deploy to Server
 
+# Запускайте вручную, когда VPS снова доступен.
+# Автодеплой на push отключён, чтобы не падать без сервера.
 on:
-  push:
-    branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-      
+
     - name: Install SSH key
       uses: shimataro/ssh-key-action@v2
       with:
         key: ${{ secrets.SSH_PRIVATE_KEY }}
         known_hosts: ${{ secrets.KNOWN_HOSTS || 'just-a-placeholder-so-we-dont-get-errors' }}
-        
+
     - name: Deploy via Rsync
       run: |
         rsync -avz --delete -e "ssh -o StrictHostKeyChecking=no" \
           ./ root@${{ secrets.SERVER_IP }}:${{ secrets.PROJECT_PATH }}/
-        
+
     - name: Restart Service
       run: |
         ssh -o StrictHostKeyChecking=no root@${{ secrets.SERVER_IP }} \

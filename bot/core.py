@@ -22,6 +22,7 @@ from telegram import InputMediaPhoto, InputMediaVideo
 from botapp.models import UserAdStat, UserAdView, Ad
 from datetime import datetime
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from bot import legal as legal_texts
 
 # Добавляем путь к корню проекта (/root)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -50,14 +51,15 @@ DB_CONFIG = {
     "user": os.getenv("DB_USER"),
     "password": os.getenv("DB_PASSWORD"),
     "host": os.getenv("DB_HOST"),
-    "port": os.getenv("DB_PORT")
+    "port": os.getenv("DB_PORT"),
+    "sslmode": os.getenv("DB_SSLMODE", "require"),
 }
 
 # Состояния для ConversationHandler
 (
     NAME, PHOTO, AGE, GENDER, PREFERRED_GENDER, CITY, EXPERIENCE, 
-    DESCRIPTION, GYM_NAME, GYM_STREET, TOGGLE_BADGE
-) = range(11)
+    DESCRIPTION, GYM_NAME, GYM_STREET, TOGGLE_BADGE, CONSENT
+) = range(12)
 
 async def get_user_from_db(user_id, context):
     """Получаем данные пользователя из таблицы users"""
@@ -220,12 +222,16 @@ async def save_user_to_db(user_data, context, update: Update = None, referrer_id
         gym_street_value = user_data.get('gym_street')
         video_value = user_data.get('video')
         
+        consent_at = user_data.get('consent_accepted_at') or legal_texts.utc_now()
+        consent_version = user_data.get('consent_version') or legal_texts.CONSENT_VERSION
+
         cursor.execute("""
             INSERT INTO users (
                 telegram_id, username, name, age, gender,
                 preferred_gender, city_id, experience, description,
-                gym_name, gym_street, video, is_viewed
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE)
+                gym_name, gym_street, video, is_viewed,
+                consent_accepted_at, consent_version
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE, %s, %s)
             ON CONFLICT (telegram_id) 
             DO UPDATE SET
                 username = EXCLUDED.username,
@@ -239,7 +245,9 @@ async def save_user_to_db(user_data, context, update: Update = None, referrer_id
                 gym_name = EXCLUDED.gym_name,
                 gym_street = COALESCE(EXCLUDED.gym_street, NULL),
                 video = COALESCE(EXCLUDED.video, NULL),
-                is_viewed = FALSE
+                is_viewed = FALSE,
+                consent_accepted_at = COALESCE(EXCLUDED.consent_accepted_at, users.consent_accepted_at),
+                consent_version = COALESCE(EXCLUDED.consent_version, users.consent_version)
             RETURNING id
         """, (
             context.user_data['user_id'],
@@ -253,7 +261,9 @@ async def save_user_to_db(user_data, context, update: Update = None, referrer_id
             description_value,
             user_data.get('gym_name'),
             gym_street_value,
-            video_value
+            video_value,
+            consent_at,
+            consent_version,
         ))
         
         result = cursor.fetchone()
@@ -400,8 +410,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         # Если анкеты нет, предлагаем только создание
         await update.message.reply_text(
-            "🏋️‍♂️ GymBros – бот для поиска напарника для тренировок!\n\n" 
+            "🏋️‍♂️ GymBros – бот для поиска напарника для тренировок!\n\n"
             "🤝 Создавай анкету, ищи GymBro или GymGirl рядом и качайся вместе.\n\n"
+            "Сервис для лиц 18+.\n"
+            "Перед созданием анкеты потребуется согласие на обработку персональных данных "
+            "(152-ФЗ). Документы: /privacy и /terms.\n\n"
             "Давайте создадим вашу анкету.",
             reply_markup=ReplyKeyboardMarkup([["Создать анкету"]], resize_keyboard=True)
         )
@@ -459,18 +472,28 @@ async def use_existing_profile(update: Update, context: ContextTypes.DEFAULT_TYP
     )
 
 
+def get_consent_keyboard():
+    return ReplyKeyboardMarkup(
+        [["✅ Согласен", "❌ Не согласен"]],
+        resize_keyboard=True,
+    )
+
+
 async def begin_questionnaire(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Начинаем создание анкеты"""
+    """Начинаем создание анкеты с обязательного согласия (152-ФЗ)"""
     context.user_data['user_id'] = update.effective_user.id
     print('вызов begin_questionnaire')
 
     # Получаем текущее значение show_badge перед очисткой
     current_user_data = await get_user_from_db(context.user_data['user_id'], context)
     show_badge = current_user_data.get('show_badge', True) if current_user_data else True
+    referrer_id = context.user_data.get('referrer_id')
 
     # Очищаем ВСЕ данные из предыдущей анкеты, кроме медиафайлов
     context.user_data.clear()
     context.user_data['user_id'] = update.effective_user.id  # Восстанавливаем user_id
+    if referrer_id:
+        context.user_data['referrer_id'] = referrer_id
 
     context.user_data['is_creating_profile'] = True
 
@@ -492,8 +515,36 @@ async def begin_questionnaire(update: Update, context: ContextTypes.DEFAULT_TYPE
         'show_badge': show_badge  # Сохраняем текущее значение значка
     })
 
-    await update.message.reply_text("Как вас зовут?", reply_markup=ReplyKeyboardRemove())
+    await update.message.reply_text(
+        legal_texts.consent_text(),
+        parse_mode='HTML',
+        reply_markup=get_consent_keyboard(),
+        disable_web_page_preview=True,
+    )
+    return CONSENT
+
+
+async def accept_consent(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Пользователь принял согласие на обработку ПДн и подтвердил 18+"""
+    context.user_data['consent_accepted_at'] = legal_texts.utc_now()
+    context.user_data['consent_version'] = legal_texts.CONSENT_VERSION
+    await update.message.reply_text(
+        "Спасибо! Согласие принято.\n\nКак вас зовут?",
+        reply_markup=ReplyKeyboardRemove(),
+    )
     return NAME
+
+
+async def decline_consent(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Отказ от согласия — анкету создать нельзя"""
+    context.user_data.clear()
+    await update.message.reply_text(
+        "Без согласия на обработку персональных данных создать анкету нельзя.\n"
+        "Вы всегда можете вернуться командой /start.\n\n"
+        f"Документы: /privacy и /terms\nПоддержка: {legal_texts.operator_telegram()}",
+        reply_markup=ReplyKeyboardRemove(),
+    )
+    return ConversationHandler.END
 
 async def get_city_canonical_name(city_id):
     """Получаем основное название города по ID"""
@@ -746,7 +797,7 @@ async def get_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def get_age(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         age = int(update.message.text)
-        if age < 10 or age > 100:
+        if age < 18 or age > 100:
             raise ValueError
         context.user_data['age'] = age
         await update.message.reply_text(
@@ -755,7 +806,9 @@ async def get_age(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return GENDER
     except ValueError:
-        await update.message.reply_text("Пожалуйста, введите корректный возраст (число от 10 до 100)!")
+        await update.message.reply_text(
+            "Сервис доступен только с 18 лет. Введите возраст числом от 18 до 100."
+        )
         return AGE
     
 # Добавляем новую функцию для обработки пола
@@ -2807,9 +2860,30 @@ async def delete_user_profile(user_id):
             
         user_db_id = user_db_id[0]
         
-        # Удаляем все связанные данные
+        # Удаляем все связанные данные (отзыв согласия / удаление ПДн)
         cursor.execute("DELETE FROM user_photos WHERE user_id = %s", (user_db_id,))
-        cursor.execute("DELETE FROM user_actions WHERE user_id = %s OR target_user_id = %s", (user_db_id, user_db_id))
+        cursor.execute(
+            "DELETE FROM user_actions WHERE user_id = %s OR target_user_id = %s",
+            (user_db_id, user_db_id),
+        )
+        try:
+            cursor.execute(
+                "DELETE FROM referrals WHERE referrer_id = %s OR referred_id = %s",
+                (user_db_id, user_db_id),
+            )
+        except Exception:
+            pass
+        try:
+            cursor.execute(
+                'DELETE FROM "botapp_useradview" WHERE user_id = %s',
+                (user_id,),
+            )
+            cursor.execute(
+                'DELETE FROM "botapp_useradstat" WHERE user_id = %s',
+                (user_id,),
+            )
+        except Exception:
+            pass
         cursor.execute("DELETE FROM users WHERE id = %s", (user_db_id,))
         
         conn.commit()
@@ -3020,7 +3094,9 @@ SETTINGS, SUBSCRIPTION_INFO, GET_USER_ID = range(50, 53)
 def get_settings_keyboard():
     return ReplyKeyboardMarkup([
         ["Условия подписки", "Узнать мой ID"],
-        ["Реферальная система", "Лидерборд"],  # Добавлена кнопка Лидерборд
+        ["Реферальная система", "Лидерборд"],
+        ["Политика конфиденциальности", "Соглашение"],
+        ["🗑 Удалить мои данные"],
         ["Назад"]
     ], resize_keyboard=True)
 
@@ -3099,6 +3175,89 @@ async def back_to_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=get_edit_keyboard()
     )
     return ConversationHandler.END
+
+
+async def show_privacy_policy(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    in_consent = bool(
+        context.user_data.get('is_creating_profile')
+        and not context.user_data.get('consent_accepted_at')
+    )
+    await update.message.reply_text(
+        legal_texts.privacy_short_text(),
+        parse_mode='HTML',
+        disable_web_page_preview=True,
+        reply_markup=get_consent_keyboard() if in_consent else get_settings_keyboard(),
+    )
+    return CONSENT if in_consent else SETTINGS
+
+
+async def show_terms(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    in_consent = bool(
+        context.user_data.get('is_creating_profile')
+        and not context.user_data.get('consent_accepted_at')
+    )
+    await update.message.reply_text(
+        legal_texts.terms_short_text(),
+        parse_mode='HTML',
+        disable_web_page_preview=True,
+        reply_markup=get_consent_keyboard() if in_consent else get_settings_keyboard(),
+    )
+    return CONSENT if in_consent else SETTINGS
+
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        legal_texts.help_text(),
+        parse_mode='HTML',
+        disable_web_page_preview=True,
+    )
+
+
+async def privacy_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        legal_texts.privacy_short_text(),
+        parse_mode='HTML',
+        disable_web_page_preview=True,
+    )
+
+
+async def terms_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        legal_texts.terms_short_text(),
+        parse_mode='HTML',
+        disable_web_page_preview=True,
+    )
+
+
+async def delete_my_data_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Отзыв согласия и удаление персональных данных пользователя"""
+    user_id = update.effective_user.id
+    existing = await get_user_from_db(user_id, context)
+    if not existing:
+        await update.message.reply_text(
+            "У вас нет сохранённых данных анкеты.\n"
+            "Если появятся новые данные — удалить их можно этой же командой.",
+            reply_markup=ReplyKeyboardRemove(),
+        )
+        return ConversationHandler.END
+
+    success = await delete_user_profile(user_id)
+    context.user_data.clear()
+    if success:
+        await update.message.reply_text(
+            "✅ Ваша анкета и связанные персональные данные удалены.\n"
+            "Согласие на обработку отозвано.\n\n"
+            "Чтобы пользоваться сервисом снова — /start",
+            reply_markup=ReplyKeyboardRemove(),
+        )
+    else:
+        await update.message.reply_text(
+            "❌ Не удалось удалить данные автоматически. "
+            f"Напишите в поддержку: {legal_texts.operator_telegram()}",
+            reply_markup=ReplyKeyboardRemove(),
+        )
+    return ConversationHandler.END
+
 
 async def contact_manager(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Ссылка на менеджера для подписки с шаблонными сообщениями"""
@@ -4509,11 +4668,21 @@ def main():
     
     # Обработчик команды /start
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("privacy", privacy_command))
+    application.add_handler(CommandHandler("terms", terms_command))
+    application.add_handler(CommandHandler("delete_my_data", delete_my_data_command))
 
     # Обработчик создания анкеты
     create_conv_handler = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex("^Создать анкету$"), begin_questionnaire)],
         states={
+            CONSENT: [
+                MessageHandler(filters.Regex("^✅ Согласен$"), accept_consent),
+                MessageHandler(filters.Regex("^❌ Не согласен$"), decline_consent),
+                MessageHandler(filters.Regex("^Политика конфиденциальности$"), show_privacy_policy),
+                MessageHandler(filters.Regex("^Соглашение$"), show_terms),
+            ],
             NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_name)],
             PHOTO: [
                 MessageHandler(filters.PHOTO | filters.VIDEO | filters.TEXT, get_media)
@@ -4607,6 +4776,9 @@ def main():
                 MessageHandler(filters.Regex("^Узнать мой ID$"), get_user_id_info),
                 MessageHandler(filters.Regex("^Реферальная система$"), share_referral),
                 MessageHandler(filters.Regex("^Лидерборд$"), show_leaderboard),
+                MessageHandler(filters.Regex("^Политика конфиденциальности$"), show_privacy_policy),
+                MessageHandler(filters.Regex("^Соглашение$"), show_terms),
+                MessageHandler(filters.Regex("^🗑 Удалить мои данные$"), delete_my_data_command),
                 MessageHandler(filters.Regex("^Назад$"), back_to_menu)
             ],
             SUBSCRIPTION_INFO: [

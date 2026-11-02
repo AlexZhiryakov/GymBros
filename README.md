@@ -1,64 +1,65 @@
-# GymBros
+# 🏋️ GymBros — поиск напарника для тренировок
 
-<p align="center">
-  <strong>Telegram-бот для поиска напарника для тренировок</strong><br/>
-  «Качковский Tinder» — анкеты, лайки, зал рядом и тренировки вдвоём.
-</p>
+Telegram-бот для знакомств в зале: создаёшь анкету, листаешь ленту и находишь GymBro или GymGirl рядом.
 
-<p align="center">
-  <a href="https://t.me/OfficialGymBrosBot"><img src="https://img.shields.io/badge/Telegram-Открыть%20бота-26A5E4?style=for-the-badge&logo=telegram&logoColor=white" alt="Open bot"></a>
-  <a href="https://t.me/OfficialGymBrosBot"><img src="https://img.shields.io/badge/Demo-t.me%2FOfficialGymBrosBot-black?style=for-the-badge" alt="Demo"></a>
-  <img src="https://img.shields.io/badge/Python-3.12+-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python">
-  <img src="https://img.shields.io/badge/License-Portfolio-lightgrey?style=for-the-badge" alt="License">
-</p>
-
-<p align="center">
-  <a href="https://t.me/OfficialGymBrosBot"><strong>🚀 Live demo → @OfficialGymBrosBot</strong></a>
-</p>
+![Python](https://img.shields.io/badge/python-3.12+-3776AB?logo=python&logoColor=white)
+![Telegram Bot](https://img.shields.io/badge/telegram-bot-26A5E4?logo=telegram&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Neon-4169E1?logo=postgresql&logoColor=white)
+![Django](https://img.shields.io/badge/Django-admin-092E20?logo=django&logoColor=white)
 
 ---
 
-## О проекте
+## 🔗 Живое демо
 
-**GymBros** — pet-проект / бывший продукт 2025 года: бот в Telegram, где можно создать анкету и найти GymBro или GymGirl для совместных тренировок.
+- Бот в Telegram: **[t.me/OfficialGymBrosBot](https://t.me/OfficialGymBrosBot)**
+- Канал проекта: [@gymbroshub](https://t.me/gymbroshub)
 
-Идея простая: меньше «кто сегодня свободен в зале?», больше совпадений по городу, залу и предпочтениям.
+Открой бота → `/start` → согласие 18+ → анкета → лента.
 
-| | |
-|---|---|
-| **Статус** | Online (демо / портфолио) |
-| **Платформа** | Telegram |
-| **Возраст** | 18+ |
-| **Демо** | [t.me/OfficialGymBrosBot](https://t.me/OfficialGymBrosBot) |
+---
 
-## Возможности
+## 📖 О проекте
 
-- Анкета: имя, фото/видео, возраст, пол, город, зал, описание, стаж
-- Лента подходящих анкет — лайк / дизлайк / суперлайк
-- Уведомления о взаимном интересе
-- Реферальная система и лидерборд
-- Premium / VIP-функции
-- Согласие на обработку ПДн, политика и удаление данных (**152-ФЗ**)
+**GymBros** — «качковский Tinder»: бот помогает найти человека для совместных тренировок по городу, залу и предпочтениям.
 
-## Стек технологий
+Пользователь собирает анкету (фото/видео, возраст, пол, город, зал, описание), смотрит подходящие профили, ставит лайки и получает уведомления о взаимном интересе. Есть рефералка, лидерборд и Premium/VIP-функции.
 
-| Слой | Технологии |
-|---|---|
-| Бот | Python, [python-telegram-bot](https://github.com/python-telegram-bot/python-telegram-bot), APScheduler |
-| Данные | PostgreSQL (Neon), psycopg2 |
-| Админка | Django (рекламные объявления) |
-| Деплой | Docker / FadeHost (long polling) |
+Проект оформлен как портфолио-демо с живым ботом. Добавлены согласие на обработку ПДн, политика конфиденциальности и удаление данных (**152-ФЗ**).
 
-## Как пользоваться (демо)
+---
 
-1. Открой бота: [t.me/OfficialGymBrosBot](https://t.me/OfficialGymBrosBot)
-2. Нажми **Start** / отправь `/start`
-3. Прими согласие (18+ и обработка ПДн)
-4. Создай анкету и листай ленту
+## 🛠️ Стек технологий
 
-Полезные команды: `/help`, `/privacy`, `/terms`, `/delete_my_data`
+* **Python 3.12+** — язык проекта
+* **python-telegram-bot** — Telegram Bot API, диалоги, клавиатуры, polling
+* **PostgreSQL (Neon)** — анкеты, лайки, города, рефералы
+* **psycopg2** — работа с базой
+* **Django** — админка для рекламных объявлений
+* **APScheduler** — ежедневные задачи (лимиты, подписки)
+* **python-dotenv** — конфигурация через `.env`
+* **Docker / FadeHost** — деплой always-on процесса бота
 
-## Быстрый старт (локально)
+---
+
+## 🚀 Как пользоваться ботом
+
+1. Открой [живое демо](https://t.me/OfficialGymBrosBot).
+2. Нажми **Start** или отправь `/start`.
+3. Прими согласие на обработку персональных данных (18+).
+4. Создай анкету:
+   * имя, фото или видео;
+   * возраст, пол, кого ищешь;
+   * город, зал, описание.
+5. Зайди в **«Смотреть анкеты»** и листай ленту:
+   * лайк / дизлайк / суперлайк;
+   * при взаимном лайке придёт уведомление.
+6. В **«⚙️ Настройки»** можно открыть политику, соглашение или удалить свои данные.
+
+Полезные команды: `/help`, `/privacy`, `/terms`, `/delete_my_data`, `/cancel`.
+
+---
+
+## 💻 Локальный запуск
 
 ```bash
 git clone https://github.com/AlexZhiryakov/GymBros.git
@@ -81,19 +82,19 @@ python scripts/add_consent_columns.py
 python main.py
 ```
 
-Подробнее про выкладку: [docs/DEPLOY.md](docs/DEPLOY.md)
+Подробнее про деплой: [docs/DEPLOY.md](docs/DEPLOY.md)
 
-## Юридические документы
+---
 
-| Документ | Файл | В боте |
-|---|---|---|
-| Политика конфиденциальности | [docs/PRIVACY_POLICY.md](docs/PRIVACY_POLICY.md) | `/privacy` |
-| Пользовательское соглашение | [docs/USER_AGREEMENT.md](docs/USER_AGREEMENT.md) | `/terms` |
-| Удаление данных | — | `/delete_my_data` |
+## ⚖️ Документы (152-ФЗ)
 
-Перед созданием анкеты пользователь подтверждает возраст **18+** и согласие на обработку персональных данных.
+* [Политика конфиденциальности](docs/PRIVACY_POLICY.md) — `/privacy`
+* [Пользовательское соглашение](docs/USER_AGREEMENT.md) — `/terms`
+* Удаление анкеты и данных — `/delete_my_data`
 
-## Структура репозитория
+---
+
+## 📁 Структура
 
 ```text
 ├── main.py              # Точка входа
@@ -101,30 +102,18 @@ python main.py
 │   ├── core.py          # Логика бота
 │   └── legal.py         # Тексты 152-ФЗ
 ├── gymbros_admin/       # Django admin (реклама)
-├── scripts/             # Служебные / SQL-скрипты
+├── scripts/             # Служебные скрипты
 ├── docs/                # Политика, соглашение, деплой
 ├── Dockerfile
 └── .env.example
 ```
 
-## Переменные окружения
+---
 
-См. [.env.example](.env.example).
-
-Секреты (`TOKEN`, пароль БД) храни только в `.env` / Environment Variables хостинга — **не коммить** в git.
-
-## Roadmap / заметки
-
-- Проект оформлен как портфолио-демо с живым ботом
-- База пользователей сохранена с периода активного трафика
-- Бесплатный always-on хостинг + Neon для PostgreSQL
-
-## Автор
+## 👤 Автор
 
 **Александр Жиряков**  
-Telegram поддержки: [@gymbros_manager](https://t.me/gymbros_manager)  
+Поддержка: [@gymbros_manager](https://t.me/gymbros_manager)  
 Email: alexzhiryakov17@mail.ru
 
-## Лицензия
-
-Код публикуется для портфолио / pet-проекта. Использование — на свой страх и риск.
+Код публикуется для портфолио / pet-проекта.
